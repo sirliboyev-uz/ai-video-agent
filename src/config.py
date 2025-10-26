@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     PORT: int = 8000
     ENVIRONMENT: str = "development"
 
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/ai_video_agent"
+    # Database (SQLite for MVP, PostgreSQL for production)
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/videos.db"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
