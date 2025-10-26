@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None
     ELEVENLABS_MODEL: str = "eleven_turbo_v2_5"
 
+    # Kie.ai Sora 2 API
+    KIE_AI_API_KEY: str
+    SORA2_DURATION: str = "10"  # "10" or "15" seconds
+    SORA2_ASPECT_RATIO: str = "portrait"  # "portrait" (9:16) or "landscape" (16:9)
+    SORA2_REMOVE_WATERMARK: bool = True
+
     # YouTube API
     YOUTUBE_CLIENT_ID: Optional[str] = None
     YOUTUBE_CLIENT_SECRET: Optional[str] = None

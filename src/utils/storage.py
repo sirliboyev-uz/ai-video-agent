@@ -21,6 +21,7 @@ class StorageHandler:
             (self.local_path / "videos").mkdir(exist_ok=True)
             (self.local_path / "audio").mkdir(exist_ok=True)
             (self.local_path / "images").mkdir(exist_ok=True)
+            (self.local_path / "clips").mkdir(exist_ok=True)  # Sora 2 video clips
 
     async def save_audio(self, audio_bytes: bytes, video_id: str) -> str:
         """
@@ -69,6 +70,36 @@ class StorageHandler:
 
             async with aiofiles.open(file_path, "wb") as f:
                 await f.write(image_bytes)
+
+            return str(file_path)
+
+        elif self.provider == "minio":
+            raise NotImplementedError("MinIO support coming in Phase 3")
+
+        else:
+            raise ValueError(f"Unsupported storage provider: {self.provider}")
+
+    async def save_clip(self, clip_bytes: bytes, video_id: str, clip_number: int) -> str:
+        """
+        Save video clip file (for Sora 2 clips).
+
+        Args:
+            clip_bytes: Video clip data
+            video_id: Video UUID
+            clip_number: Clip index
+
+        Returns:
+            File path or URL
+        """
+        if self.provider == "local":
+            # Create video-specific directory
+            video_dir = self.local_path / "clips" / video_id
+            video_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = video_dir / f"clip_{clip_number}.mp4"
+
+            async with aiofiles.open(file_path, "wb") as f:
+                await f.write(clip_bytes)
 
             return str(file_path)
 

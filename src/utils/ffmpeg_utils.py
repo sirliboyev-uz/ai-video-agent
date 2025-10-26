@@ -195,6 +195,87 @@ class FFmpegUtils:
             Path(srt_file).unlink(missing_ok=True)
 
     @staticmethod
+    async def concatenate_videos(
+        video_paths: List[str],
+        audio_path: str,
+        output_path: str,
+        resolution: Optional[str] = None
+    ) -> dict:
+        """
+        Concatenate multiple video clips with audio overlay.
+
+        Args:
+            video_paths: List of video clip paths to concatenate
+            audio_path: Audio file path to use as background audio
+            output_path: Output video path
+            resolution: Optional resolution override (e.g., "1080x1920")
+
+        Returns:
+            Video metadata
+        """
+        if not video_paths:
+            raise ValueError("At least one video clip is required")
+
+        # Create temp file list for FFmpeg concat
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            concat_file = f.name
+            for video_path in video_paths:
+                # FFmpeg concat format for video files
+                f.write(f"file '{video_path}'\n")
+
+        try:
+            # Build FFmpeg command
+            cmd = [
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_file,  # Video clips
+                '-i', audio_path,   # Background audio
+                '-map', '0:v',      # Use video from concat
+                '-map', '1:a',      # Use audio from audio file
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-shortest',  # Match shortest stream
+                '-movflags', '+faststart',
+                '-y',
+                output_path
+            ]
+
+            # Add resolution scaling if specified
+            if resolution:
+                width, height = resolution.split('x')
+                cmd.insert(-3, '-vf')
+                cmd.insert(-3, f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1')
+
+            # Run FFmpeg
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            # Get video metadata
+            metadata = FFmpegUtils.get_video_metadata(output_path)
+
+            return {
+                "success": True,
+                "output_path": output_path,
+                "metadata": metadata,
+                "num_clips": len(video_paths)
+            }
+
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"FFmpeg concatenation error: {e.stderr}")
+
+        finally:
+            # Clean up temp file
+            Path(concat_file).unlink(missing_ok=True)
+
+    @staticmethod
     def check_ffmpeg_installed() -> bool:
         """Check if FFmpeg is installed."""
         try:
