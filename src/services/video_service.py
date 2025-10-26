@@ -60,20 +60,19 @@ class VideoService:
         print(f"⏱️  Duration: {duration}s | Scenes: {num_scenes}")
         print(f"{'='*60}\n")
 
-        # Create database record
+        # Create database record (id is auto-generated UUID)
         video = Video(
-            uuid=video_id,
             user_id=user_id,
             topic=topic,
+            niche=niche,
+            target_duration=duration,
             script="",
             status=VideoStatus.PROCESSING,
-            duration=duration,
-            cost_usd=0.0,
-            metadata_={
+            processing_steps={
                 "style": style,
-                "niche": niche,
                 "num_scenes": num_scenes,
-                "brand_voice": brand_voice
+                "brand_voice": brand_voice,
+                "video_id": video_id  # Store our generated ID in metadata
             }
         )
         db.add(video)
@@ -97,7 +96,7 @@ class VideoService:
 
             # Update database
             video.script = script
-            video.metadata_["script_structure"] = {
+            video.script_metadata = {
                 "hook": script_data["hook"],
                 "value_prop": script_data["value_prop"],
                 "main_content": script_data["main_content"],
@@ -119,8 +118,8 @@ class VideoService:
             print(f"✅ Voice complete (${voice_cost:.4f})\n")
 
             # Update database
-            video.metadata_["audio"] = {
-                "path": audio_path,
+            video.voiceover_url = audio_path
+            video.processing_steps["audio"] = {
                 "voice_id": voice_data["voice_id"],
                 "character_count": voice_data["character_count"],
                 "settings": voice_data["settings"]
@@ -141,8 +140,8 @@ class VideoService:
             print(f"✅ Visuals complete (${visual_cost:.4f})\n")
 
             # Update database
-            video.metadata_["images"] = {
-                "paths": image_paths,
+            video.scene_images = image_paths
+            video.processing_steps["images"] = {
                 "scene_descriptions": visual_data["scene_descriptions"],
                 "num_images": visual_data["num_images"]
             }
@@ -164,34 +163,15 @@ class VideoService:
             print(f"✅ Assembly complete (${assembly_cost:.4f})\n")
 
             # Update database with final video
-            video.video_path = video_path
-            video.thumbnail_path = image_paths[0]  # Use first image as thumbnail
+            video.video_url = video_path
+            video.thumbnail_url = image_paths[0]  # Use first image as thumbnail
             video.status = VideoStatus.COMPLETED
-            video.cost_usd = total_cost
-            video.metadata_["assembly"] = assembly_data["metadata"]
+            video.processing_steps["assembly"] = assembly_data["metadata"]
+            video.processing_steps["total_cost_usd"] = total_cost
             await db.commit()
 
-            # Track costs
-            cost_record = CostTracking(
-                video_id=video.id,
-                operation="video_generation",
-                provider="multi",
-                cost_usd=total_cost,
-                metadata_={
-                    "script_cost": script_cost,
-                    "voice_cost": voice_cost,
-                    "visual_cost": visual_cost,
-                    "assembly_cost": assembly_cost,
-                    "breakdown": {
-                        "gpt4o": script_cost,
-                        "elevenlabs": voice_cost,
-                        "dalle3": visual_cost,
-                        "ffmpeg": assembly_cost
-                    }
-                }
-            )
-            db.add(cost_record)
-            await db.commit()
+            # Cost tracking is stored in processing_steps for now
+            # TODO: Update CostTracking model to support per-video tracking
 
             # Phase 5 & 6: Publishing (placeholder for future)
             print(f"📤 PHASE 5/6: Publishing (Manual)")
@@ -220,7 +200,7 @@ class VideoService:
             print(f"{'='*60}\n")
 
             return {
-                "video_id": video_id,
+                "video_id": str(video.id),  # Use database UUID
                 "video_path": video_path,
                 "thumbnail_path": image_paths[0],
                 "duration": assembly_data["metadata"].get("duration", duration),
@@ -235,17 +215,17 @@ class VideoService:
                     "assembly": assembly_cost
                 },
                 "metadata": {
-                    "script_structure": video.metadata_["script_structure"],
-                    "audio": video.metadata_["audio"],
-                    "images": video.metadata_["images"],
-                    "assembly": video.metadata_["assembly"]
+                    "script_structure": video.script_metadata,
+                    "audio": video.processing_steps.get("audio", {}),
+                    "images": video.processing_steps.get("images", {}),
+                    "assembly": video.processing_steps.get("assembly", {})
                 }
             }
 
         except Exception as e:
             # Update database with failure
             video.status = VideoStatus.FAILED
-            video.metadata_["error"] = str(e)
+            video.error_message = str(e)
             await db.commit()
 
             print(f"\n❌ VIDEO GENERATION FAILED")
@@ -285,20 +265,19 @@ class VideoService:
         try:
             yield format_sse("start", f'{{"video_id": "{video_id}", "topic": "{topic}"}}')
 
-            # Create database record
+            # Create database record (id is auto-generated UUID)
             video = Video(
-                uuid=video_id,
                 user_id=user_id,
                 topic=topic,
+                niche=niche,
+                target_duration=duration,
                 script="",
                 status=VideoStatus.PROCESSING,
-                duration=duration,
-                cost_usd=0.0,
-                metadata_={
+                processing_steps={
                     "style": style,
-                    "niche": niche,
                     "num_scenes": num_scenes,
-                    "brand_voice": brand_voice
+                    "brand_voice": brand_voice,
+                    "video_id": video_id  # Store our generated ID in metadata
                 }
             )
             db.add(video)
@@ -396,7 +375,7 @@ class VideoService:
         except Exception as e:
             # Update database with failure
             video.status = VideoStatus.FAILED
-            video.metadata_["error"] = str(e)
+            video.error_message = str(e)
             await db.commit()
 
             yield format_sse("error", f'{{"message": "{str(e)}"}}')

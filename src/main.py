@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -257,8 +257,8 @@ class VideoGenerateRequest(BaseModel):
     num_scenes: int = Field(default=6, ge=3, le=12, description="Number of scenes/images")
     brand_voice: str = Field(default="Professional yet conversational", description="Brand voice guidelines")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "topic": "5 proven ways to save money in 2025",
                 "style": "educational",
@@ -268,6 +268,7 @@ class VideoGenerateRequest(BaseModel):
                 "brand_voice": "Professional yet conversational"
             }
         }
+    )
 
 
 class VideoResponse(BaseModel):
@@ -280,8 +281,8 @@ class VideoResponse(BaseModel):
     script: str
     metadata: dict
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "video_id": "123e4567-e89b-12d3-a456-426614174000",
                 "video_path": "/storage/videos/123e4567-e89b-12d3-a456-426614174000.mp4",
@@ -292,6 +293,7 @@ class VideoResponse(BaseModel):
                 "metadata": {}
             }
         }
+    )
 
 
 # ============================================================================
@@ -374,7 +376,7 @@ async def get_video(
     Returns complete video information including paths, metadata, and costs.
     """
     result = await db.execute(
-        select(Video).where(Video.uuid == video_id)
+        select(Video).where(Video.id == video_id)
     )
     video = result.scalar_one_or_none()
 
@@ -382,7 +384,7 @@ async def get_video(
         raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
 
     return {
-        "video_id": video.uuid,
+        "video_id": str(video.id),
         "topic": video.topic,
         "script": video.script,
         "video_path": video.video_path,
@@ -425,7 +427,7 @@ async def list_videos(
         "limit": limit,
         "videos": [
             {
-                "video_id": v.uuid,
+                "video_id": str(v.id),
                 "topic": v.topic,
                 "status": v.status.value,
                 "duration": v.duration,

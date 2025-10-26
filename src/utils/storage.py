@@ -13,7 +13,7 @@ class StorageHandler:
     def __init__(self):
         """Initialize storage handler."""
         self.provider = settings.STORAGE_PROVIDER
-        self.local_path = Path(settings.LOCAL_STORAGE_PATH)
+        self.local_path = Path(settings.LOCAL_STORAGE_PATH).resolve()  # Use absolute path
 
         # Create local storage directories
         if self.provider == "local":
