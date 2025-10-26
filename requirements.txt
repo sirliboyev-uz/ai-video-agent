@@ -1,0 +1,62 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# Database
+sqlalchemy[asyncio]>=2.0.25
+asyncpg>=0.29.0  # PostgreSQL async driver
+alembic>=1.13.0  # Database migrations
+
+# Task Queue
+celery[redis]>=5.3.4
+redis>=5.0.1
+
+# AI & Generation
+openai>=1.10.0  # GPT-4o + DALL-E 3
+anthropic>=0.18.0  # Claude (optional alternative)
+elevenlabs>=0.2.26  # Voice synthesis
+
+# Media Processing
+ffmpeg-python>=0.2.0  # Video assembly
+Pillow>=10.2.0  # Image processing
+
+# Platform APIs
+google-api-python-client>=2.115.0  # YouTube Data + Upload API
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+pytrends>=4.9.2  # Google Trends (unofficial)
+
+# Storage
+minio>=7.2.0  # MinIO client (self-hosted S3-compatible storage)
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Utilities
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+httpx>=0.26.0  # Async HTTP client
+aiofiles>=23.2.1  # Async file operations
+
+# Validation & Security
+email-validator>=2.1.0
+cryptography>=42.0.0
+
+# Monitoring & Logging
+python-json-logger>=2.0.7
+sentry-sdk[fastapi]>=1.40.0  # Error tracking (optional)
+
+# Development
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+black>=24.1.1
+ruff>=0.1.14
+
+# Optional: Pictory API alternative (if not using FFmpeg)
+# requests>=2.31.0
+
+# Optional: TikTok unofficial API (if Direct Post API unavailable)
+# TikTokApi>=6.0.0
