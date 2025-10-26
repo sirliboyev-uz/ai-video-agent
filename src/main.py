@@ -2,13 +2,19 @@
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.config import settings
-from src.models import init_db
+from src.models import init_db, get_db
+from src.models.database import Video
+from src.services import VideoService
 
 
 @asynccontextmanager
@@ -235,6 +241,201 @@ async def config_info():
             "aspect_ratio": settings.DEFAULT_ASPECT_RATIO,
             "resolution": settings.DEFAULT_RESOLUTION
         }
+    }
+
+
+# ============================================================================
+# Pydantic Models for API Requests/Responses
+# ============================================================================
+
+class VideoGenerateRequest(BaseModel):
+    """Request model for video generation."""
+    topic: str = Field(..., min_length=3, max_length=500, description="Video topic or subject")
+    style: str = Field(default="educational", description="Script style (educational, entertaining, etc.)")
+    niche: str = Field(default="finance", description="Content niche (finance, tech, health, etc.)")
+    duration: int = Field(default=60, ge=15, le=180, description="Target duration in seconds")
+    num_scenes: int = Field(default=6, ge=3, le=12, description="Number of scenes/images")
+    brand_voice: str = Field(default="Professional yet conversational", description="Brand voice guidelines")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "topic": "5 proven ways to save money in 2025",
+                "style": "educational",
+                "niche": "finance",
+                "duration": 60,
+                "num_scenes": 6,
+                "brand_voice": "Professional yet conversational"
+            }
+        }
+
+
+class VideoResponse(BaseModel):
+    """Response model for video generation."""
+    video_id: str
+    video_path: str
+    thumbnail_path: str
+    duration: float
+    cost_usd: float
+    script: str
+    metadata: dict
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "video_id": "123e4567-e89b-12d3-a456-426614174000",
+                "video_path": "/storage/videos/123e4567-e89b-12d3-a456-426614174000.mp4",
+                "thumbnail_path": "/storage/images/123e4567-e89b-12d3-a456-426614174000_scene_1.png",
+                "duration": 62.5,
+                "cost_usd": 0.43,
+                "script": "Want to save money in 2025? Here are 5 proven strategies...",
+                "metadata": {}
+            }
+        }
+
+
+# ============================================================================
+# Video Generation API Endpoints
+# ============================================================================
+
+@app.post("/api/video/generate", response_model=VideoResponse, tags=["Video Generation"])
+async def generate_video(
+    request: VideoGenerateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a complete video through the 6-phase AI pipeline.
+
+    This endpoint orchestrates:
+    1. Script generation with GPT-4o
+    2. Voice synthesis with ElevenLabs
+    3. Visual generation with DALL-E 3
+    4. Video assembly with FFmpeg
+    5. Publishing (manual in MVP)
+    6. Analytics (manual in MVP)
+
+    Returns the complete video with metadata and cost breakdown.
+    """
+    try:
+        video_service = VideoService()
+        result = await video_service.generate_video(
+            topic=request.topic,
+            db=db,
+            style=request.style,
+            niche=request.niche,
+            duration=request.duration,
+            num_scenes=request.num_scenes,
+            brand_voice=request.brand_voice
+        )
+        return VideoResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
+
+
+@app.post("/api/video/generate/stream", tags=["Video Generation"])
+async def generate_video_stream(
+    request: VideoGenerateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate video with real-time progress updates via Server-Sent Events (SSE).
+
+    Returns a stream of events showing progress through each pipeline phase:
+    - start: Video generation begins
+    - phase: Each phase (script, voice, visual, assembly) with status updates
+    - complete: Final video ready
+    - error: If generation fails
+
+    Use EventSource API in frontend to consume this stream.
+    """
+    video_service = VideoService()
+    return StreamingResponse(
+        video_service.generate_video_stream(
+            topic=request.topic,
+            db=db,
+            style=request.style,
+            niche=request.niche,
+            duration=request.duration,
+            num_scenes=request.num_scenes,
+            brand_voice=request.brand_voice
+        ),
+        media_type="text/event-stream"
+    )
+
+
+@app.get("/api/video/{video_id}", tags=["Video Management"])
+async def get_video(
+    video_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve a video by its UUID.
+
+    Returns complete video information including paths, metadata, and costs.
+    """
+    result = await db.execute(
+        select(Video).where(Video.uuid == video_id)
+    )
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
+
+    return {
+        "video_id": video.uuid,
+        "topic": video.topic,
+        "script": video.script,
+        "video_path": video.video_path,
+        "thumbnail_path": video.thumbnail_path,
+        "status": video.status.value,
+        "duration": video.duration,
+        "cost_usd": video.cost_usd,
+        "created_at": video.created_at.isoformat(),
+        "metadata": video.metadata_
+    }
+
+
+@app.get("/api/video/list", tags=["Video Management"])
+async def list_videos(
+    skip: int = 0,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all videos with pagination.
+
+    Query parameters:
+    - skip: Number of videos to skip (default: 0)
+    - limit: Maximum videos to return (default: 20, max: 100)
+    """
+    if limit > 100:
+        limit = 100
+
+    result = await db.execute(
+        select(Video)
+        .order_by(Video.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    videos = result.scalars().all()
+
+    return {
+        "total": len(videos),
+        "skip": skip,
+        "limit": limit,
+        "videos": [
+            {
+                "video_id": v.uuid,
+                "topic": v.topic,
+                "status": v.status.value,
+                "duration": v.duration,
+                "cost_usd": v.cost_usd,
+                "created_at": v.created_at.isoformat(),
+                "video_path": v.video_path,
+                "thumbnail_path": v.thumbnail_path
+            }
+            for v in videos
+        ]
     }
 
 
