@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     SORA2_ASPECT_RATIO: str = "portrait"  # "portrait" (9:16) or "landscape" (16:9)
     SORA2_REMOVE_WATERMARK: bool = True
 
+    # Brand Character System
+    DEFAULT_CHARACTER_STYLE: str = "no_face"  # no_face, professional_male, relatable_female
+
     # YouTube API
     YOUTUBE_CLIENT_ID: Optional[str] = None
     YOUTUBE_CLIENT_SECRET: Optional[str] = None

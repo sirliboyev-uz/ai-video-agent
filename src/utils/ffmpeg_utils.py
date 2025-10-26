@@ -199,16 +199,20 @@ class FFmpegUtils:
         video_paths: List[str],
         audio_path: str,
         output_path: str,
-        resolution: Optional[str] = None
+        resolution: Optional[str] = None,
+        add_crossfade: bool = True,
+        crossfade_duration: float = 0.5
     ) -> dict:
         """
-        Concatenate multiple video clips with audio overlay.
+        Concatenate multiple video clips with audio overlay and optional crossfade transitions.
 
         Args:
             video_paths: List of video clip paths to concatenate
             audio_path: Audio file path to use as background audio
             output_path: Output video path
             resolution: Optional resolution override (e.g., "1080x1920")
+            add_crossfade: Add smooth crossfade transitions between clips (default: True)
+            crossfade_duration: Duration of crossfade in seconds (default: 0.5s)
 
         Returns:
             Video metadata
@@ -216,64 +220,138 @@ class FFmpegUtils:
         if not video_paths:
             raise ValueError("At least one video clip is required")
 
-        # Create temp file list for FFmpeg concat
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-            concat_file = f.name
-            for video_path in video_paths:
-                # FFmpeg concat format for video files
-                f.write(f"file '{video_path}'\n")
+        # If only one clip or no crossfade, use simple concatenation
+        if len(video_paths) == 1 or not add_crossfade:
+            # Create temp file list for FFmpeg concat
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                concat_file = f.name
+                for video_path in video_paths:
+                    f.write(f"file '{video_path}'\n")
 
-        try:
-            # Build FFmpeg command
-            cmd = [
-                'ffmpeg',
-                '-f', 'concat',
-                '-safe', '0',
-                '-i', concat_file,  # Video clips
-                '-i', audio_path,   # Background audio
-                '-map', '0:v',      # Use video from concat
-                '-map', '1:a',      # Use audio from audio file
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',
-                '-c:a', 'aac',
-                '-b:a', '128k',
-                '-shortest',  # Match shortest stream
-                '-movflags', '+faststart',
-                '-y',
-                output_path
-            ]
+            try:
+                # Build FFmpeg command
+                cmd = [
+                    'ffmpeg',
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', concat_file,  # Video clips
+                    '-i', audio_path,   # Background audio
+                    '-map', '0:v',      # Use video from concat
+                    '-map', '1:a',      # Use audio from audio file
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-shortest',  # Match shortest stream
+                    '-movflags', '+faststart',
+                    '-y',
+                    output_path
+                ]
 
-            # Add resolution scaling if specified
-            if resolution:
-                width, height = resolution.split('x')
-                cmd.insert(-3, '-vf')
-                cmd.insert(-3, f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1')
+                # Add resolution scaling if specified
+                if resolution:
+                    width, height = resolution.split('x')
+                    cmd.insert(-3, '-vf')
+                    cmd.insert(-3, f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1')
 
-            # Run FFmpeg
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
+                # Run FFmpeg
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
 
-            # Get video metadata
-            metadata = FFmpegUtils.get_video_metadata(output_path)
+                # Get video metadata
+                metadata = FFmpegUtils.get_video_metadata(output_path)
 
-            return {
-                "success": True,
-                "output_path": output_path,
-                "metadata": metadata,
-                "num_clips": len(video_paths)
-            }
+                return {
+                    "success": True,
+                    "output_path": output_path,
+                    "metadata": metadata,
+                    "num_clips": len(video_paths),
+                    "transitions": "none"
+                }
 
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"FFmpeg concatenation error: {e.stderr}")
+            except subprocess.CalledProcessError as e:
+                raise Exception(f"FFmpeg concatenation error: {e.stderr}")
 
-        finally:
-            # Clean up temp file
-            Path(concat_file).unlink(missing_ok=True)
+            finally:
+                # Clean up temp file
+                Path(concat_file).unlink(missing_ok=True)
+
+        # Multiple clips with crossfade - use complex filter
+        else:
+            try:
+                # Build complex filter for crossfade transitions
+                filter_parts = []
+                input_args = []
+
+                # Add all video inputs
+                for i, video_path in enumerate(video_paths):
+                    input_args.extend(['-i', video_path])
+
+                # Add audio input
+                input_args.extend(['-i', audio_path])
+
+                # Build crossfade filter chain
+                if len(video_paths) == 2:
+                    # Simple case: 2 videos
+                    filter_parts.append(f'[0:v][1:v]xfade=transition=fade:duration={crossfade_duration}:offset=9.5[v]')
+                else:
+                    # Complex case: 3+ videos
+                    # First transition
+                    filter_parts.append(f'[0:v][1:v]xfade=transition=fade:duration={crossfade_duration}:offset=9.5[v01]')
+
+                    # Middle transitions
+                    for i in range(2, len(video_paths)):
+                        prev_label = f'v0{i-1}' if i == 2 else f'v{i-1}'
+                        curr_label = f'v{i}' if i < len(video_paths) - 1 else 'v'
+                        offset = 9.5 + (i - 1) * (10 - crossfade_duration)
+                        filter_parts.append(f'[{prev_label}][{i}:v]xfade=transition=fade:duration={crossfade_duration}:offset={offset}[{curr_label}]')
+
+                filter_complex = ';'.join(filter_parts)
+
+                # Build FFmpeg command with complex filter
+                cmd = [
+                    'ffmpeg',
+                    *input_args,
+                    '-filter_complex', filter_complex,
+                    '-map', '[v]',  # Use filtered video
+                    '-map', f'{len(video_paths)}:a',  # Use audio from last input
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-shortest',
+                    '-movflags', '+faststart',
+                    '-y',
+                    output_path
+                ]
+
+                # Run FFmpeg
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
+                # Get video metadata
+                metadata = FFmpegUtils.get_video_metadata(output_path)
+
+                return {
+                    "success": True,
+                    "output_path": output_path,
+                    "metadata": metadata,
+                    "num_clips": len(video_paths),
+                    "transitions": f"crossfade ({crossfade_duration}s)"
+                }
+
+            except subprocess.CalledProcessError as e:
+                raise Exception(f"FFmpeg crossfade error: {e.stderr}")
 
     @staticmethod
     def check_ffmpeg_installed() -> bool:

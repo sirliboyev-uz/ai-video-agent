@@ -21,7 +21,8 @@ class OpenAIClient:
         style: str,
         duration: int,
         brand_voice: str,
-        niche: str
+        niche: str,
+        include_timestamps: bool = False
     ) -> Dict[str, Any]:
         """
         Generate video script using GPT-4o.
@@ -32,10 +33,22 @@ class OpenAIClient:
             duration: Target duration in seconds
             brand_voice: Brand voice guidelines
             niche: Content niche (finance, wealth, productivity)
+            include_timestamps: Include precise timestamps for video-audio sync
 
         Returns:
             Script data with structure and metadata
         """
+        timestamp_instructions = ""
+        if include_timestamps:
+            timestamp_instructions = """
+TIMESTAMP REQUIREMENTS (CRITICAL FOR VIDEO SYNC):
+- Break script into precise segments with start/end times
+- Each segment should be 8-12 seconds (optimal for Sora 2 video clips)
+- Include exact word count per segment for voiceover timing
+- Provide visual action description matching the narration
+- Format: {{"start": 0, "end": 10, "text": "...", "visual": "...", "word_count": N}}
+"""
+
         system_prompt = f"""You are an expert YouTube Shorts scriptwriter specializing in {niche} content.
 Create engaging, viral-worthy scripts optimized for {duration}-second vertical videos.
 
@@ -47,6 +60,7 @@ CRITICAL REQUIREMENTS:
 2. Value Proposition (3-10s): Why should they keep watching?
 3. Main Content (10-{duration-10}s): Core message with actionable insights
 4. Call-to-Action ({duration-10}-{duration}s): Subscribe/follow/engage
+{timestamp_instructions}
 
 Format your response as JSON:
 {{
@@ -56,7 +70,8 @@ Format your response as JSON:
   "cta": "Call to action",
   "full_script": "Complete script with timing markers",
   "estimated_word_count": number,
-  "scene_descriptions": ["scene 1", "scene 2", ...]
+  "scene_descriptions": ["scene 1", "scene 2", ...],
+  "segments": [{{"start": 0, "end": 10, "text": "...", "visual": "...", "word_count": N}}] (only if timestamps enabled)
 }}"""
 
         user_prompt = f"""Create a {duration}-second {style} YouTube Short script about: {topic}
@@ -207,6 +222,41 @@ Return as JSON array:
             images.append(result)
 
         return images
+
+    async def generate_completion(
+        self,
+        prompt: str,
+        max_tokens: int = 1500,
+        temperature: float = 0.7,
+        response_format: str = "text"
+    ) -> str:
+        """
+        Generate text completion using GPT-4o.
+
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Creativity level (0.0-1.0)
+            response_format: "text" or "json_object"
+
+        Returns:
+            Generated text response
+        """
+        try:
+            response_format_param = {"type": response_format} if response_format == "json_object" else None
+
+            response = await self.client.chat.completions.create(
+                model=self.model_gpt,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format_param
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            raise Exception(f"Completion generation failed: {str(e)}")
 
     def _calculate_cost(self, tokens: int, model: str) -> float:
         """Calculate API cost based on token usage."""

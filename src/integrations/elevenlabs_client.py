@@ -1,6 +1,8 @@
 """ElevenLabs API client for voice synthesis."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import httpx
+import io
+import wave
 
 from src.config import settings
 
@@ -128,6 +130,88 @@ class ElevenLabsClient:
         # This is a placeholder - actual implementation requires multipart/form-data
         # For MVP, users will use pre-existing voices
         raise NotImplementedError("Voice cloning requires audio file upload - use web UI for now")
+
+    async def synthesize_segments(
+        self,
+        segments: List[Dict[str, Any]],
+        voice_id: Optional[str] = None,
+        stability: float = 0.6,
+        similarity_boost: float = 0.75,
+        style: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Synthesize multiple text segments with timing information.
+
+        Args:
+            segments: List of segments with 'text' and optional timing info
+            voice_id: Voice ID to use
+            stability: Voice stability
+            similarity_boost: Voice similarity
+            style: Style exaggeration
+
+        Returns:
+            List of audio segments with duration metadata
+        """
+        results = []
+        total_cost = 0.0
+
+        for i, segment in enumerate(segments):
+            try:
+                audio_data = await self.synthesize_speech(
+                    text=segment['text'],
+                    voice_id=voice_id,
+                    stability=stability,
+                    similarity_boost=similarity_boost,
+                    style=style
+                )
+
+                # Try to get actual audio duration using pydub (requires ffmpeg)
+                try:
+                    import subprocess
+                    import tempfile
+                    import os
+
+                    # Save audio bytes to temp file
+                    with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+                        tmp_file.write(audio_data['audio_bytes'])
+                        tmp_path = tmp_file.name
+
+                    # Get duration using ffprobe
+                    cmd = [
+                        'ffprobe',
+                        '-v', 'quiet',
+                        '-show_entries', 'format=duration',
+                        '-of', 'default=noprint_wrappers=1:nokey=1',
+                        tmp_path
+                    ]
+
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    duration = float(result.stdout.strip())
+
+                    # Clean up temp file
+                    os.unlink(tmp_path)
+
+                except Exception as e:
+                    # Fallback: estimate duration (average 150 words per minute = 2.5 words/sec)
+                    word_count = len(segment['text'].split())
+                    duration = word_count / 2.5
+
+                segment_result = {
+                    **audio_data,
+                    "segment_index": i,
+                    "duration_seconds": duration,
+                    "planned_start": segment.get('start', None),
+                    "planned_end": segment.get('end', None)
+                }
+
+                results.append(segment_result)
+                total_cost += audio_data['cost_usd']
+
+            except Exception as e:
+                print(f"Warning: Segment {i} synthesis failed: {str(e)}")
+                continue
+
+        return results
 
     def calculate_cost(self, text: str) -> float:
         """Calculate estimated cost for text synthesis."""

@@ -271,6 +271,38 @@ class VideoGenerateRequest(BaseModel):
     )
 
 
+class VideoGenerateSora2Request(BaseModel):
+    """Request model for Sora 2 video generation."""
+    topic: str = Field(..., min_length=3, max_length=500, description="Video topic or subject")
+    style: str = Field(default="educational", description="Script style (educational, entertaining, etc.)")
+    niche: str = Field(default="finance", description="Content niche (finance, tech, health, etc.)")
+    duration: int = Field(default=60, ge=15, le=180, description="Target duration in seconds")
+    num_scenes: int = Field(default=4, ge=2, le=8, description="Number of Sora 2 video clips")
+    brand_voice: str = Field(default="Professional yet conversational", description="Brand voice guidelines")
+    clip_duration: str = Field(default="10", description="Sora 2 clip duration: '10' or '15' seconds")
+    aspect_ratio: str = Field(default="portrait", description="Video aspect ratio: 'portrait' (9:16) or 'landscape' (16:9)")
+    character_style: str = Field(
+        default="no_face",
+        description="Brand character style: 'no_face' (graphics only), 'professional_male', 'relatable_female', or 'custom'"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "topic": "Top 3 passive income strategies for 2025",
+                "style": "educational",
+                "niche": "finance",
+                "duration": 40,
+                "num_scenes": 4,
+                "brand_voice": "Professional yet conversational",
+                "clip_duration": "10",
+                "aspect_ratio": "portrait",
+                "character_style": "no_face"
+            }
+        }
+    )
+
+
 class VideoResponse(BaseModel):
     """Response model for video generation."""
     video_id: str
@@ -363,6 +395,56 @@ async def generate_video_stream(
         ),
         media_type="text/event-stream"
     )
+
+
+@app.post("/api/video/generate-sora2", response_model=VideoResponse, tags=["Video Generation"])
+async def generate_video_sora2(
+    request: VideoGenerateSora2Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a complete video using Sora 2 AI video clips instead of static images.
+
+    This endpoint uses Sora 2 text-to-video model (via kie.ai) for realistic video generation:
+    1. Script generation with GPT-4o
+    2. Voice synthesis with ElevenLabs
+    3. Video clip generation with Sora 2 (realistic AI-generated video scenes)
+    4. Video assembly with FFmpeg (concatenate clips + audio overlay)
+
+    Key Differences from Standard Pipeline:
+    - Uses Sora 2 video clips instead of DALL-E 3 static images
+    - More realistic motion and transitions
+    - Higher production quality for social media
+    - Generation time: ~2-3 minutes per 10s clip
+
+    Cost Breakdown:
+    - Script: $0.01-0.02 (GPT-4o)
+    - Voice: $0.15-0.30 (ElevenLabs, ~500 chars)
+    - Video: $0.15 per 10s clip × num_scenes (Sora 2 via kie.ai)
+    - Assembly: $0.00 (FFmpeg is free)
+    - Example: 4 clips (40s video) = ~$0.60-0.90 total
+
+    Supported Parameters:
+    - clip_duration: "10" or "15" seconds per Sora 2 clip
+    - aspect_ratio: "portrait" (9:16) for Shorts/Reels or "landscape" (16:9)
+    - num_scenes: 2-8 clips (recommend 4-6 for optimal pacing)
+    """
+    try:
+        video_service = VideoService()
+        result = await video_service.generate_video_sora2(
+            topic=request.topic,
+            db=db,
+            style=request.style,
+            niche=request.niche,
+            duration=request.duration,
+            num_scenes=request.num_scenes,
+            brand_voice=request.brand_voice,
+            clip_duration=request.clip_duration,
+            aspect_ratio=request.aspect_ratio
+        )
+        return VideoResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sora 2 video generation failed: {str(e)}")
 
 
 @app.get("/api/video/{video_id}", tags=["Video Management"])
